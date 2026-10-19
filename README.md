@@ -6,13 +6,13 @@ Run the example:
 
 ```powershell
 python main.py
-python -m unittest test_first_code_deliverable -v
+python -m unittest discover -v
 ```
 
 `first_code_deliverable.ipynb` is retained only as reference material. It is not
 required to run or test the project. The example is
 "Which scientist developed the theory of general relativity?" with the existing
-Einstein passage. No SQuAD download or full dataset experiment is performed.
+Einstein passage. The default command does not download SQuAD or run evaluation.
 
 The main algorithm is `query_anchored_expansion()` in `main.py`: it extracts
 query terms, locates anchors, expands and merges regions, ranks them, and selects
@@ -74,3 +74,100 @@ All six proposed B/budget combinations and the existing 32/64 demonstration
 are evaluated. The 46-token passage fits every context budget, so all methods
 retrieve the full passage: this example validates execution, not comparative
 performance or dataset-wide accuracy.
+
+## SQuAD evaluation
+
+The entry point remains `main.py`; `squad_evaluation.py` handles dataset loading
+and the experiment. Existing commands keep their behavior:
+
+| Command | Behavior |
+|---|---|
+| `python main.py` | Print context for the hardcoded Einstein question |
+| `python main.py --evaluate` | Evaluate the Einstein example with Ollama |
+| `python main.py --squad-evaluate` | Evaluate the 300-question SQuAD experiment with Ollama |
+
+Configure `.env` first. The SQuAD command downloads and caches the official
+[SQuAD 1.1 public development dataset](https://rajpurkar.github.io/SQuAD-explorer/dataset/dev-v1.1.json)
+in `data/dev-v1.1.json`. The [dataset project](https://rajpurkar.github.io/SQuAD-explorer/)
+distributes the data under CC BY-SA 4.0. Use `--squad-file path/to/file.json` to
+use a local copy without downloading. SQuAD 2.0 is not supported.
+
+The default seed is 42. Ten eligible articles are sampled, with thirty questions
+per article: two articles supply 60 project development questions, and eight
+separate articles supply 240 project test questions. These are custom splits
+of the public data, not official SQuAD test results. Selection does not use model
+results or keyword-match success. Use development results for tuning and keep
+test results separate. Both splits run by default; to run only development:
+
+```powershell
+python main.py --squad-evaluate --squad-split dev
+```
+
+For a small trial (two questions, eighteen comparisons per question):
+
+```powershell
+python main.py --squad-evaluate --squad-split dev --squad-limit 2
+```
+
+`--squad-seed` changes the reproducible selection. Every full run compares all
+three methods across chunk limits 128/256/512 and budgets 512/1024: 5,400
+comparison rows. Identical prompts within a question reuse the same response;
+different contexts can require separate model calls. The candidate collection
+contains **all paragraphs of the question's article**, identically for every
+method, rather than only the known answer paragraph. Article selection is
+oracle-provided; this does not evaluate a corpus-wide first-stage retriever.
+
+Results go in a fresh `evaluation_results/squad_<UTC timestamp>/` folder:
+
+- `manifest.json`: dataset checksum, model/settings, seed, all 300 selected IDs,
+  split assignments, and IDs actually evaluated.
+- `questions.json`: selected questions and reference answers.
+- `evidence_labels.json`: labels fixed before retrieval, in original character offsets.
+- `results.jsonl`: one flushed record per comparison with spans, prompt, response,
+  answer/evidence metrics, latency, and generation errors.
+- `summary.json` and `summary.md`: averages separately by split, method, and configuration.
+- `preprocessing.json`: one-time baseline construction cost per article/chunk limit.
+
+Completed rows survive interruption; JSON summaries update after each question.
+A new invocation starts a new run, rather than resuming an interrupted one.
+Generated results and cached data are Git-ignored. Preserve/share chosen results
+explicitly when recording the final experiment. No endpoint is stored in the
+manifest, though network error messages can include connection details.
+
+### Evidence labels and metric limits
+
+SQuAD supplies answer spans, not independent complete supporting-evidence labels.
+By default, evidence metrics use a clearly marked `answer_sentence_proxy`:
+sentences overlapping reference answer spans, determined before retrieval.
+Sentence splitting is a punctuation heuristic. Multiple annotated answers use
+the union of those sentences for evidence metrics; answer EM/F1 instead takes
+the best match over valid references. Proxy evidence metrics are exploratory,
+not manually validated evidence completeness.
+
+For final evidence metrics, supply reviewed labels with
+`--evidence-labels reviewed_labels.json`. The file maps every evaluated question
+ID to a nonempty list of intervals; offsets refer to the original paragraph,
+are zero-based, and exclude `end_char`:
+
+```json
+{
+  "question-id": [
+    {"document_id": 0, "start_char": 0, "end_char": 100}
+  ]
+}
+```
+
+`document_id` is the paragraph's zero-based index within the article. All labels
+are validated before generation. The raw dataset is sufficient to establish
+these labels independently of retrieved results; do not tune labels to outputs.
+The exported proxy-label file uses the same schema for review.
+
+No-match questions remain in the run. Summaries include the no-match rate,
+evidence recall/precision/completeness, context size, retrieval latency, and
+generation success/error counts. EM/F1 are fractions from 0 to 1. Failed model
+calls have null raw scores and count as zero in aggregate accuracy, so failures
+cannot inflate scores by dropping questions. Baseline preprocessing is cached
+and reported separately; query-anchored construction is timed at query time.
+Word-token budgets and the simplified sentence-adaptive baseline have the same
+limitations described above. These commands do not reproduce the published
+Adaptive Chunking method.

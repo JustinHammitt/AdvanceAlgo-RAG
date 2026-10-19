@@ -2,6 +2,7 @@
 
 Run the example: python main.py
 Run and record evaluation (including Ollama): python main.py --evaluate
+Run the SQuAD experiment: python main.py --squad-evaluate
 The Jupyter notebook is reference material only; maintain this file.
 """
 
@@ -903,10 +904,28 @@ def evaluate_example(base_url=None, model=None, output_dir='evaluation_results')
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Query-anchored expansion example")
-    parser.add_argument("--evaluate", action="store_true",
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--evaluate", action="store_true",
                         help="Run and save the example comparison, including Ollama answers")
+    modes.add_argument('--squad-evaluate', action='store_true', help='Run the SQuAD 1.1 comparison')
+    parser.add_argument('--squad-file', help='Local SQuAD 1.1 JSON; otherwise download/cache official dev data')
+    parser.add_argument('--squad-split', choices=('all', 'dev', 'test'), default='all')
+    parser.add_argument('--squad-limit', type=int, help='Run only this many selected questions')
+    parser.add_argument('--squad-seed', type=int, default=42)
+    parser.add_argument('--evidence-labels', help='Reviewed evidence JSON keyed by question ID')
     args = parser.parse_args()
-    if args.evaluate:
+    if not args.squad_evaluate and (args.squad_file or args.squad_limit is not None or
+                                   args.evidence_labels or args.squad_split != 'all' or args.squad_seed != 42):
+        parser.error('SQuAD options require --squad-evaluate')
+    if args.squad_evaluate:
+        from squad_evaluation import evaluate_squad
+        try:
+            evaluate_squad(dataset_path=args.squad_file, seed=args.squad_seed,
+                           split=args.squad_split, limit=args.squad_limit,
+                           evidence_path=args.evidence_labels)
+        except (ValueError, OSError) as exc:
+            parser.error(str(exc))
+    elif args.evaluate:
         try:
             evaluate_example()
         except ValueError as exc:
