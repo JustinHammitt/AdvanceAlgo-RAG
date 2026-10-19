@@ -1,6 +1,7 @@
 """SQuAD 1.1 experiment runner. Invoke through main.py --squad-evaluate."""
 from collections import defaultdict
 from datetime import datetime, timezone
+import csv
 import hashlib
 import json
 from pathlib import Path
@@ -128,6 +129,18 @@ def summarize(rows):
     return result
 
 
+def write_summary_csv(summary, path):
+    """Export numeric values at full precision; UTF-8 BOM supports Excel."""
+    fields = ('split', 'method', 'chunk_limit', 'context_budget', 'questions',
+              'evidence_recall', 'precision', 'completeness', 'exact_match',
+              'answer_f1', 'context_tokens', 'retrieval_ms', 'no_query_match',
+              'generation_successes', 'generation_errors')
+    with Path(path).open('w', newline='', encoding='utf-8-sig') as output:
+        writer = csv.DictWriter(output, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(summary)
+
+
 def evaluate_squad(dataset_path=None, seed=42, split='all', limit=None,
                    evidence_path=None, output_root='evaluation_results'):
     if split not in ('all', 'dev', 'test') or (limit is not None and limit < 1):
@@ -214,7 +227,9 @@ def evaluate_squad(dataset_path=None, seed=42, split='all', limit=None,
                     log.flush()
             print(f'[{number}/{len(questions)}] {q["split"]}: {q["id"]}', flush=True)
             # Save summaries after each question, so interruptions retain completed work.
-            (output / 'summary.json').write_text(json.dumps(summarize(rows), indent=2)+'\n', encoding='utf-8')
+            summary = summarize(rows)
+            (output / 'summary.json').write_text(json.dumps(summary, indent=2)+'\n', encoding='utf-8')
+            write_summary_csv(summary, output / 'summary.csv')
             (output / 'preprocessing.json').write_text(json.dumps(preparation, indent=2)+'\n', encoding='utf-8')
     summary = summarize(rows)
     lines = ['# SQuAD evaluation', '', metadata['note'], '',
@@ -228,5 +243,5 @@ def evaluate_squad(dataset_path=None, seed=42, split='all', limit=None,
                                 'answer_f1', 'context_tokens', 'generation_errors')]
         lines.append('| ' + ' | '.join(f'{v:.3f}' if isinstance(v, float) else str(v) for v in values) + ' |')
     (output / 'summary.md').write_text('\n'.join(lines)+'\n', encoding='utf-8')
-    print(f'Finished. Read {output / "summary.md"}', flush=True)
+    print(f'Finished. Read {output / "summary.csv"} or {output / "summary.md"}', flush=True)
     return output

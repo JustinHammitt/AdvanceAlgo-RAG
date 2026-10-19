@@ -1,5 +1,6 @@
 """Offline SQuAD tests; no downloads or real model evaluation."""
 import contextlib
+import csv
 import io
 import json
 from pathlib import Path
@@ -70,6 +71,15 @@ class SquadTests(unittest.TestCase):
             self.assertEqual(len(manifest['run_question_ids']), 2)
             self.assertEqual(manifest['evidence_kind'], 'answer_sentence_proxy')
             self.assertTrue((output / 'summary.md').exists())
+            with (output / 'summary.csv').open(newline='', encoding='utf-8-sig') as file:
+                exported = list(csv.DictReader(file))
+            summary = json.loads((output / 'summary.json').read_text())
+            self.assertEqual(len(exported), len(summary))
+            for actual, expected in zip(exported, summary):
+                self.assertEqual(actual['method'], expected['method'])
+                self.assertEqual(float(actual['answer_f1']), expected['answer_f1'])
+                self.assertEqual(float(actual['evidence_recall']), expected['evidence_recall'])
+                self.assertEqual(int(actual['generation_errors']), expected['generation_errors'])
             self.assertEqual(len(json.loads((output / 'preprocessing.json').read_text())), 6)
 
     def test_generation_failure_is_visible(self):

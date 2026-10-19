@@ -125,14 +125,29 @@ Results go in a fresh `evaluation_results/squad_<UTC timestamp>/` folder:
 - `evidence_labels.json`: labels fixed before retrieval, in original character offsets.
 - `results.jsonl`: one flushed record per comparison with spans, prompt, response,
   answer/evidence metrics, latency, and generation errors.
-- `summary.json` and `summary.md`: averages separately by split, method, and configuration.
+- `summary.csv`, `summary.json`, and `summary.md`: averages separately by split,
+  method, and configuration. CSV preserves full numeric precision and opens in
+  Excel; Markdown stays available for quick reading. CSV also includes retrieval
+  latency, no-match rate, and generation success/error counts.
 - `preprocessing.json`: one-time baseline construction cost per article/chunk limit.
 
-Completed rows survive interruption; JSON summaries update after each question.
+Completed rows survive interruption; JSON and CSV summaries update after each question.
 A new invocation starts a new run, rather than resuming an interrupted one.
 Generated results and cached data are Git-ignored. Preserve/share chosen results
 explicitly when recording the final experiment. No endpoint is stored in the
 manifest, though network error messages can include connection details.
+
+To export an older run without calling Ollama again, use its saved `summary.json`:
+
+```python
+import json
+from pathlib import Path
+from squad_evaluation import write_summary_csv
+
+run = Path('evaluation_results/squad_YOUR_RUN_FOLDER')
+write_summary_csv(json.loads((run / 'summary.json').read_text(encoding='utf-8')),
+                  run / 'summary.csv')
+```
 
 ### Evidence labels and metric limits
 
