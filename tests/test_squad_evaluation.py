@@ -10,6 +10,8 @@ from unittest.mock import patch
 
 import main
 import squad_evaluation as squad
+import adaptive_baseline
+from tests.test_adaptive_baseline import FixtureBackend
 
 
 def dataset():
@@ -24,6 +26,12 @@ def dataset():
 
 
 class SquadTests(unittest.TestCase):
+    def setUp(self):
+        self.chunker = adaptive_baseline.AdaptiveChunker(FixtureBackend())
+        patcher = patch.object(adaptive_baseline, 'get_adaptive_chunker', return_value=self.chunker)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_reproducible_article_disjoint_selection(self):
         questions = squad.select_questions(dataset())
         self.assertEqual(questions, squad.select_questions(list(reversed(dataset()))))
@@ -70,6 +78,10 @@ class SquadTests(unittest.TestCase):
             self.assertEqual(len(manifest['selection']), 300)
             self.assertEqual(len(manifest['run_question_ids']), 2)
             self.assertEqual(manifest['evidence_kind'], 'answer_sentence_proxy')
+            self.assertIn('Adaptive-Chunking', manifest['methods'])
+            audit = json.loads((output / 'adaptive_selection.json').read_text())
+            self.assertTrue(audit)
+            self.assertEqual(set(audit[0]['candidates'][0]['metrics']), set(adaptive_baseline.METRICS))
             self.assertTrue((output / 'summary.md').exists())
             with (output / 'summary.csv').open(newline='', encoding='utf-8-sig') as file:
                 exported = list(csv.DictReader(file))

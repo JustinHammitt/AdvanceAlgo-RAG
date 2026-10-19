@@ -13,7 +13,7 @@ import urllib.request
 import main as core
 
 DATA_URL = 'https://rajpurkar.github.io/SQuAD-explorer/dataset/dev-v1.1.json'
-METHODS = ('Query-Anchored', 'Fixed-Size', 'Sentence-Adaptive')
+METHODS = ('Query-Anchored', 'Fixed-Size', 'Adaptive-Chunking')
 CONFIGURATIONS = [(b, budget) for b in (128, 256, 512) for budget in (512, 1024)]
 
 
@@ -146,6 +146,10 @@ def evaluate_squad(dataset_path=None, seed=42, split='all', limit=None,
     if split not in ('all', 'dev', 'test') or (limit is not None and limit < 1):
         raise ValueError('Choose dev/test/all and a positive question limit')
     base_url, model = core.ollama_config()
+    from adaptive_baseline import get_adaptive_chunker
+    startup = perf_counter()
+    adaptive_chunker = get_adaptive_chunker()
+    adaptive_startup_ms = (perf_counter()-startup)*1000
     articles, checksum, location = load_dataset(dataset_path)
     selection = select_questions(articles, seed)
     questions = [q for q in selection if split == 'all' or q['split'] == split]
@@ -163,19 +167,20 @@ def evaluate_squad(dataset_path=None, seed=42, split='all', limit=None,
     output.mkdir(parents=True, exist_ok=False)
     metadata = dict(dataset=str(location.resolve()), dataset_sha256=checksum, source_url=DATA_URL,
                     seed=seed, model=model, split=split, limit=limit,
+                    adaptive_backend=adaptive_chunker.backend.describe(), adaptive_startup_ms=adaptive_startup_ms,
                     generation_options=dict(temperature=0, seed=42, num_predict=64, num_ctx=4096),
                     configurations=CONFIGURATIONS, methods=METHODS,
                     evidence_kind='reviewed' if reviewed is not None else 'answer_sentence_proxy',
                     candidate_scope='all paragraphs of the question article; oracle article selection',
                     selection=[{k: q[k] for k in ('id', 'title', 'split', 'document_id')} for q in selection],
                     run_question_ids=[q['id'] for q in questions],
-                    note='Project dev/test splits of SQuAD public dev data, not official SQuAD test scores. Sentence-Adaptive is a simplified baseline.')
+                    note='Project dev/test splits of SQuAD public dev data, not official SQuAD test scores. Adaptive Chunking uses paper metrics with a SQuAD candidate pool.')
     (output / 'manifest.json').write_text(json.dumps(metadata, indent=2)+'\n', encoding='utf-8')
     (output / 'evidence_labels.json').write_text(json.dumps(labels, indent=2)+'\n', encoding='utf-8')
     snapshots = [{k: q[k] for k in ('id', 'title', 'split', 'question', 'answers', 'document_id')} for q in questions]
     (output / 'questions.json').write_text(json.dumps(snapshots, indent=2)+'\n', encoding='utf-8')
     print(f'Running {len(questions)} questions, {len(CONFIGURATIONS)*len(METHODS)} comparisons each. Results: {output}', flush=True)
-    rows, prepared, preparation = [], {}, []
+    rows, prepared, preparation, adaptive_audit = [], {}, [], []
     with (output / 'results.jsonl').open('w', encoding='utf-8') as log:
         for number, q in enumerate(questions, 1):
             terms = core.extract_query_terms_from_query(q['question'])
@@ -189,9 +194,15 @@ def evaluate_squad(dataset_path=None, seed=42, split='all', limit=None,
                         key = (q['title'], B, method)
                         if key not in prepared:
                             start = perf_counter()
-                            prepared[key] = core.baseline_documents(documents, B, method == 'Sentence-Adaptive')
+                            prepared[key] = core.baseline_documents(documents, B, method == 'Adaptive-Chunking')
                             preparation.append(dict(title=q['title'], chunk_limit=B, method=method,
                                                     preprocessing_ms=(perf_counter()-start)*1000))
+                            if method == 'Adaptive-Chunking':
+                                adaptive_audit.extend(dict(title=q['title'], chunk_limit=B,
+                                                           document_id=d['document_id'], **d['adaptive_selection'])
+                                                      for d in prepared[key])
+                                (output / 'adaptive_selection.json').write_text(
+                                    json.dumps(adaptive_audit, indent=2)+'\n', encoding='utf-8')
                     start = perf_counter()
                     if method == 'Query-Anchored':
                         spans = core.query_anchored_expansion(q['question'], documents, B, budget)

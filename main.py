@@ -737,30 +737,20 @@ def select_spans_within_context_budget(
     return selected_spans
 
 def baseline_documents(documents, B, adaptive=False):
-    """Query-independent fixed or sentence-packed chunk construction."""
+    """Query-independent fixed-size or five-metric Adaptive Chunking."""
+    if B < 1:
+        raise ValueError("B must be positive")
+    if adaptive:
+        from adaptive_baseline import get_adaptive_chunker
+        return get_adaptive_chunker().build_documents(documents, B)
     result = []
     for doc_id, text in enumerate(clean_all_documents(documents)):
         tokens = tokenize_document(text)
-        if adaptive:
-            # Sentence boundaries are mapped to the same word-token positions.
-            ends = [i + 1 for i, token in enumerate(tokens)
-                    if i == len(tokens) - 1 or re.search(
-                        r'[.!?]', text[token[2]:tokens[i + 1][1]])]
-            units, start = [], 0
-            for end in ends:
-                units.extend((j, min(j + B, end)) for j in range(start, end, B))
-                start = end
-            regions = []
-            for start, end in units:
-                if regions and end - regions[-1][0] <= B:
-                    regions[-1] = (regions[-1][0], end)
-                else:
-                    regions.append((start, end))
-        else:
-            regions = [(i, min(i + B, len(tokens))) for i in range(0, len(tokens), B)]
+        regions = [(i, min(i + B, len(tokens))) for i in range(0, len(tokens), B)]
         result.append(dict(document_id=doc_id, document_text=text, tokens=tokens,
                            regions=regions, anchor_positions={}))
     return result
+
 
 def answer_scores(prediction, references):
     """SQuAD-style normalized exact match and multiset token F1."""
@@ -830,6 +820,11 @@ def ollama_config(base_url=None, model=None, env_path=None):
 def evaluate_example(base_url=None, model=None, output_dir='evaluation_results'):
     query, document_text = EXAMPLE_QUERY, EXAMPLE_DOCUMENT
     base_url, model = ollama_config(base_url, model)
+    from adaptive_baseline import get_adaptive_chunker
+    startup = perf_counter()
+    adaptive_chunker = get_adaptive_chunker()
+    adaptive_startup_ms = (perf_counter()-startup)*1000
+    adaptive_audit = {}
     source = document_text.lower()
     evidence_texts = [
         'albert einstein was a german-born theoretical physicist.',
@@ -846,12 +841,14 @@ def evaluate_example(base_url=None, model=None, output_dir='evaluation_results')
     configurations = [(B, budget) for B in (128, 256, 512) for budget in (512, 1024)] + [(32, 64)]
     rows, answer_cache = [], {}
     for B, budget in configurations:
-        for method in ('Query-Anchored', 'Fixed-Size', 'Sentence-Adaptive'):
+        for method in ('Query-Anchored', 'Fixed-Size', 'Adaptive-Chunking'):
             preprocessing_ms = 0.0
             if method != 'Query-Anchored':
                 start = perf_counter()
-                candidates = baseline_documents([source], B, method == 'Sentence-Adaptive')
+                candidates = baseline_documents([source], B, method == 'Adaptive-Chunking')
                 preprocessing_ms = (perf_counter() - start) * 1000
+                if method == 'Adaptive-Chunking':
+                    adaptive_audit[str(B)] = [d['adaptive_selection'] for d in candidates]
             start = perf_counter()
             if method == 'Query-Anchored':
                 spans = query_anchored_expansion(query, [source], B, budget)
@@ -883,9 +880,11 @@ def evaluate_example(base_url=None, model=None, output_dir='evaluation_results')
     output = Path(output_dir)
     output.mkdir(exist_ok=True)
     report = dict(question=query, references=['Albert Einstein', 'Einstein'],
+                  adaptive_backend=adaptive_chunker.backend.describe(),
+                  adaptive_startup_ms=adaptive_startup_ms, adaptive_selection=adaptive_audit,
                   evidence=evidence, model=model, base_url=base_url,
                   generation_options=dict(temperature=0, seed=42, num_predict=64, num_ctx=4096),
-                  note='Single example; sentence-adaptive is a simplified structural baseline. Identical prompts reuse one model response.',
+                  note='Single example; Adaptive Chunking uses the paper metrics with a SQuAD candidate pool. Identical prompts reuse one model response.',
                   results=rows)
     (output / 'example_results.json').write_text(json.dumps(report, indent=2)+'\n', encoding='utf-8')
     header = '| Method | B | Budget | Recall | Precision | Complete | EM | F1 | Tokens | Prep ms | Retrieval ms |'

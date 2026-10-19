@@ -1,0 +1,4 @@
+# Authors' implementation and real coreference scoring; HTTPS only.
+adaptive-chunking[coref] @ git+https://github.com/ekimetrics/adaptive-chunking.git@ea87ce8e1a97888f3f179e7f1359ff7f43fb179d
+# Required by the Jina embedding implementation.
+einops>=0.8,<1

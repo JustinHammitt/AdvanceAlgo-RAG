@@ -6,7 +6,7 @@ Run the example:
 
 ```powershell
 python main.py
-python -m unittest discover -v
+python -m unittest discover -s tests -t . -v
 ```
 
 `first_code_deliverable.ipynb` is retained only as reference material. It is not
@@ -64,11 +64,20 @@ with independently specified evidence positions. Completeness requires all
 labeled evidence tokens. Answer EM/F1 use normalized answer text, separately
 from evidence metrics. Context size uses regex word tokens, not LLM tokens.
 
-Fixed-size and sentence-adaptive baselines use the same ranking and selection.
-Sentence-adaptive greedily packs sentences within B and splits oversized
-sentences; it is a simplified structural baseline, not a reproduction of the
-published Adaptive Chunking strategy-selection algorithm. Preprocessing is
-reported separately from retrieval time. Timings are single-run diagnostics.
+Fixed-Size and Adaptive-Chunking use the same ranking and selection.
+Adaptive-Chunking evaluates recursive, paragraph, and sentence strategies using
+the authors' five intrinsic metrics and chooses the highest-scoring strategy per
+document. Install its additional NLP dependencies before running either evaluation:
+
+```powershell
+python -m pip install -r requirements-adaptive.txt
+python -m spacy download en_core_web_sm
+```
+
+See [Adaptive Chunking setup and methodology](docs/adaptive_chunking.md) for the
+models, candidate-pool adaptation, undefined metric handling, and audit output.
+Preprocessing is reported separately from retrieval time. Timings are single-run
+diagnostics. The default Einstein retrieval demo remains dependency-free.
 
 All six proposed B/budget combinations and the existing 32/64 demonstration
 are evaluated. The 46-token passage fits every context budget, so all methods
@@ -130,6 +139,8 @@ Results go in a fresh `evaluation_results/squad_<UTC timestamp>/` folder:
   Excel; Markdown stays available for quick reading. CSV also includes retrieval
   latency, no-match rate, and generation success/error counts.
 - `preprocessing.json`: one-time baseline construction cost per article/chunk limit.
+- `adaptive_selection.json`: candidate strategies, five metric scores, selected
+  strategy, and model configuration for each input document/chunk limit.
 
 Completed rows survive interruption; JSON and CSV summaries update after each question.
 A new invocation starts a new run, rather than resuming an interrupted one.
@@ -183,6 +194,8 @@ generation success/error counts. EM/F1 are fractions from 0 to 1. Failed model
 calls have null raw scores and count as zero in aggregate accuracy, so failures
 cannot inflate scores by dropping questions. Baseline preprocessing is cached
 and reported separately; query-anchored construction is timed at query time.
-Word-token budgets and the simplified sentence-adaptive baseline have the same
-limitations described above. These commands do not reproduce the published
-Adaptive Chunking method.
+Word-token budgets have the same limitations described above. Adaptive Chunking
+uses the paper's metric implementation with our SQuAD candidate pool; it is not
+an exact reproduction of the paper's PDF experiment. Old Sentence-Adaptive
+results measured the former sentence-packing baseline and should not be relabeled
+or combined with new Adaptive-Chunking results.
