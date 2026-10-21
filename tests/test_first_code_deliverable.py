@@ -1,5 +1,7 @@
 """Regression tests for the main Python implementation."""
 import unittest
+import io
+import json
 from unittest.mock import patch
 import main
 
@@ -7,6 +9,32 @@ ns = vars(main)
 
 
 class DeliverableTests(unittest.TestCase):
+    def test_ollama_disables_thinking(self):
+        response = io.BytesIO(json.dumps(dict(response=' Albert Einstein ', done=True,
+                                             done_reason='stop')).encode())
+        with patch.object(main.urllib.request, 'urlopen', return_value=response) as post:
+            answer = main.ollama_answer('Question', 'http://example.test/', 'model')
+        self.assertEqual(answer, 'Albert Einstein')
+        request = post.call_args.args[0]
+        self.assertEqual(request.full_url, 'http://example.test/api/generate')
+        payload = json.loads(request.data)
+        self.assertIs(payload['think'], False)
+        self.assertNotIn('think', payload['options'])
+
+    def test_ollama_rejects_incomplete_or_empty_answers(self):
+        cases = [
+            (dict(response='Thinking Process: If the', done=True,
+                  done_reason='length', eval_count=64), "done_reason='length', eval_count=64"),
+            (dict(response='Einstein', done=False), 'incomplete'),
+            (dict(response='  ', done=True, done_reason='stop'), 'empty answer'),
+        ]
+        for result, message in cases:
+            with self.subTest(result=result):
+                response = io.BytesIO(json.dumps(result).encode())
+                with patch.object(main.urllib.request, 'urlopen', return_value=response):
+                    with self.assertRaisesRegex(ValueError, message):
+                        main.ollama_answer('Question', 'http://example.test', 'model')
+
     def test_configuration_precedence(self):
         with patch.dict(main.os.environ, {'OLLAMA_MODEL': 'environment-model'}, clear=True), \
              patch.object(main.Path, 'is_file', return_value=True), \

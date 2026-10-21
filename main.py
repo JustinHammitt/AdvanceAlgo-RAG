@@ -779,13 +779,21 @@ def evidence_scores(spans, evidence):
                 context_tokens=sum(s['token_count'] for s in spans))
 
 def ollama_answer(prompt, base_url, model):
-    payload = dict(model=model, prompt=prompt, stream=False,
+    payload = dict(model=model, prompt=prompt, stream=False, think=False,
                    options=dict(temperature=0, seed=42, num_predict=64, num_ctx=4096))
     request = urllib.request.Request(base_url.rstrip('/') + '/api/generate',
                                      json.dumps(payload).encode(),
                                      headers={'Content-Type': 'application/json'})
     with urllib.request.urlopen(request, timeout=180) as response:
-        return json.load(response)['response'].strip()
+        result = json.load(response)
+    reason = result.get('done_reason')
+    if reason == 'length' or result.get('done') is False:
+        raise ValueError(f'Ollama generation incomplete (done_reason={reason!r}, '
+                         f'eval_count={result.get("eval_count")!r}).')
+    answer = result.get('response', '').strip()
+    if not answer:
+        raise ValueError(f'Ollama returned an empty answer (done_reason={reason!r}).')
+    return answer
 
 def ollama_config(base_url=None, model=None, env_path=None):
     """Resolve explicit arguments > environment > project .env (KEY=value)."""
@@ -883,6 +891,7 @@ def evaluate_example(base_url=None, model=None, output_dir='evaluation_results')
                   adaptive_backend=adaptive_chunker.backend.describe(),
                   adaptive_startup_ms=adaptive_startup_ms, adaptive_selection=adaptive_audit,
                   evidence=evidence, model=model, base_url=base_url,
+                  think=False,
                   generation_options=dict(temperature=0, seed=42, num_predict=64, num_ctx=4096),
                   note='Single example; Adaptive Chunking uses the paper metrics with a SQuAD candidate pool. Identical prompts reuse one model response.',
                   results=rows)
