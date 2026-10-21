@@ -182,7 +182,9 @@ def evaluate_squad(dataset_path=None, seed=42, split='all', limit=None,
     (output / 'questions.json').write_text(json.dumps(snapshots, indent=2)+'\n', encoding='utf-8')
     print(f'Running {len(questions)} questions, {len(CONFIGURATIONS)*len(METHODS)} comparisons each. Results: {output}', flush=True)
     rows, prepared, preparation, adaptive_audit = [], {}, [], []
-    with (output / 'results.jsonl').open('w', encoding='utf-8') as log:
+    with (output / 'results.jsonl').open('w', encoding='utf-8') as log, \
+         (output / 'results.csv').open('w', newline='', encoding='utf-8-sig') as csv_log:
+        csv_writer = None
         for number, q in enumerate(questions, 1):
             terms = core.extract_query_terms_from_query(q['question'])
             documents = q['documents']
@@ -237,23 +239,17 @@ def evaluate_squad(dataset_path=None, seed=42, split='all', limit=None,
                     rows.append(row)
                     log.write(json.dumps(row)+'\n')
                     log.flush()
+                    if csv_writer is None:
+                        csv_writer = csv.DictWriter(csv_log, fieldnames=list(row))
+                        csv_writer.writeheader()
+                    csv_writer.writerow(core.csv_record(row))
+                    csv_log.flush()
             print(f'[{number}/{len(questions)}] {q["split"]}: {q["id"]}', flush=True)
             # Save summaries after each question, so interruptions retain completed work.
             summary = summarize(rows)
             (output / 'summary.json').write_text(json.dumps(summary, indent=2)+'\n', encoding='utf-8')
             write_summary_csv(summary, output / 'summary.csv')
             (output / 'preprocessing.json').write_text(json.dumps(preparation, indent=2)+'\n', encoding='utf-8')
-    summary = summarize(rows)
-    lines = ['# SQuAD evaluation', '', metadata['note'], '',
-             'Evidence labels: ' + metadata['evidence_kind'],
-             'Failed generations count as zero in aggregate EM/F1; raw scores are null.', '',
-             '| Split | Method | B | Budget | N | Recall | Precision | Complete | EM | F1 | Tokens | Errors |',
-             '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
-    for r in summary:
-        values = [r[k] for k in ('split', 'method', 'chunk_limit', 'context_budget', 'questions',
-                                'evidence_recall', 'precision', 'completeness', 'exact_match',
-                                'answer_f1', 'context_tokens', 'generation_errors')]
-        lines.append('| ' + ' | '.join(f'{v:.3f}' if isinstance(v, float) else str(v) for v in values) + ' |')
-    (output / 'summary.md').write_text('\n'.join(lines)+'\n', encoding='utf-8')
-    print(f'Finished. Read {output / "summary.csv"} or {output / "summary.md"}', flush=True)
+            core.write_results_csv(preparation, output / 'preprocessing.csv')
+    print(f'Finished. Read {output / "summary.csv"} and {output / "results.csv"}', flush=True)
     return output

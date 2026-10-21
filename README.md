@@ -46,8 +46,10 @@ from main import evaluate_example
 example_report = evaluate_example()
 ```
 
-Results are written to `evaluation_results/example_results.md` and
-`evaluation_results/example_results.json`. The JSON includes the fixed evidence
+Results are written to `evaluation_results/example_results.csv` and
+`evaluation_results/example_results.json`. CSV includes one row per comparison, all metrics,
+prompts, responses, errors, and selected spans (nested data uses JSON cells). Empty
+score cells indicate missing or failed responses. The JSON includes the fixed evidence
 labels, selected spans, prompts, actual model responses, errors, and settings.
 Missing or failed model responses yield pending/error status and null EM/F1,
 never fabricated scores. Identical prompts reuse the same response within a run.
@@ -132,16 +134,17 @@ Results go in a fresh `evaluation_results/squad_<UTC timestamp>/` folder:
   split assignments, and IDs actually evaluated.
 - `questions.json`: selected questions and reference answers.
 - `evidence_labels.json`: labels fixed before retrieval, in original character offsets.
-- `results.jsonl`: one flushed record per comparison with spans, prompt, response,
+- `results.csv` and `results.jsonl`: one flushed record per comparison with spans, prompt, response,
   answer/evidence metrics, latency, and generation errors.
-- `summary.csv`, `summary.json`, and `summary.md`: averages separately by split,
+- `summary.csv` and `summary.json`: averages separately by split,
   method, and configuration. CSV preserves full numeric precision and opens in
-  Excel; Markdown stays available for quick reading. CSV also includes retrieval
+  Excel. CSV also includes retrieval
   latency, no-match rate, and generation success/error counts.
-- `preprocessing.json`: one-time baseline construction cost per article/chunk limit.
+- `preprocessing.csv` and `preprocessing.json`: one-time baseline construction cost per article/chunk limit.
 - `adaptive_selection.json`: candidate strategies, five metric scores, selected
   strategy, and model configuration for each input document/chunk limit.
 
+Evaluation runs do not generate Markdown reports.
 Completed rows survive interruption; JSON and CSV summaries update after each question.
 A new invocation starts a new run, rather than resuming an interrupted one.
 Generated results and cached data are Git-ignored. Preserve/share chosen results

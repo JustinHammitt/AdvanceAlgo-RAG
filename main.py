@@ -13,6 +13,7 @@ from collections import Counter
 from pathlib import Path
 from time import perf_counter
 import json
+import csv
 import os
 import urllib.request
 
@@ -831,6 +832,21 @@ def ollama_config(base_url=None, model=None, env_path=None):
     return base_url.rstrip('/'), model
 
 
+def csv_record(row):
+    """Keep nested audit data in JSON cells and missing scores as empty cells."""
+    return {key: json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list, tuple))
+            else value for key, value in row.items()}
+
+
+def write_results_csv(rows, path):
+    """Write full-precision results with a UTF-8 BOM for Excel."""
+    fields = list(dict.fromkeys(key for row in rows for key in row))
+    with Path(path).open('w', newline='', encoding='utf-8-sig') as output:
+        writer = csv.DictWriter(output, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(csv_record(row) for row in rows)
+
+
 def evaluate_example(base_url=None, model=None, output_dir='evaluation_results'):
     query, document_text = EXAMPLE_QUERY, EXAMPLE_DOCUMENT
     base_url, model = ollama_config(base_url, model)
@@ -902,17 +918,9 @@ def evaluate_example(base_url=None, model=None, output_dir='evaluation_results')
                   note='Single example; Adaptive Chunking uses the paper metrics with a SQuAD candidate pool. Identical prompts reuse one model response.',
                   results=rows)
     (output / 'example_results.json').write_text(json.dumps(report, indent=2)+'\n', encoding='utf-8')
-    header = '| Method | B | Budget | Recall | Precision | Complete | EM | F1 | Tokens | Prep ms | Retrieval ms |'
-    lines = ['# Example evaluation', '', query, '', report['note'], '',
-             'Word-token metrics; N/A means no successful model response. Single-run timings.', '',
-             header, '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
-    for row in rows:
-        values = [row[k] for k in ('method', 'chunk_limit', 'context_budget', 'evidence_recall',
-                  'precision', 'completeness', 'exact_match', 'answer_f1', 'context_tokens',
-                  'preprocessing_ms', 'retrieval_ms')]
-        lines.append('| ' + ' | '.join('N/A' if v is None else f'{v:.3f}' if isinstance(v,float) else str(v) for v in values) + ' |')
-    (output / 'example_results.md').write_text('\n'.join(lines)+'\n', encoding='utf-8')
-    print('\n'.join(lines))
+    write_results_csv([dict(question=query, references=report['references'], model=model, **row)
+                       for row in rows], output / 'example_results.csv')
+    print(f'Finished. Read {output / "example_results.csv"}')
     return report
 
 def main():

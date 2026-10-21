@@ -1,5 +1,11 @@
 """Regression tests for the main Python implementation."""
 import unittest
+import csv
+import contextlib
+import tempfile
+from pathlib import Path
+import adaptive_baseline
+from tests.test_adaptive_baseline import FixtureBackend
 import io
 import json
 from unittest.mock import patch
@@ -9,6 +15,28 @@ ns = vars(main)
 
 
 class DeliverableTests(unittest.TestCase):
+    def test_example_exports_csv_for_success_and_failure(self):
+        for error in (None, OSError('offline, try again\nnext line')):
+            with self.subTest(error=error), tempfile.TemporaryDirectory() as directory:
+                chunker = adaptive_baseline.AdaptiveChunker(FixtureBackend())
+                with patch.object(adaptive_baseline, 'get_adaptive_chunker', return_value=chunker), \
+                     patch.object(main, 'ollama_answer', return_value='Albert Einstein', side_effect=error), \
+                     contextlib.redirect_stdout(io.StringIO()):
+                    report = main.evaluate_example('http://example.test', 'mock-model', directory)
+                output = Path(directory)
+                self.assertFalse(list(output.glob('*.md')))
+                with (output / 'example_results.csv').open(newline='', encoding='utf-8-sig') as file:
+                    rows = list(csv.DictReader(file))
+                self.assertEqual(len(rows), 21)
+                for actual, expected in zip(rows, report['results']):
+                    self.assertEqual(actual['question'], report['question'])
+                    self.assertEqual(actual['prompt'], expected['prompt'])
+                    self.assertEqual(json.loads(actual['selected_spans']), expected['selected_spans'])
+                    self.assertEqual(float(actual['retrieval_ms']), expected['retrieval_ms'])
+                    self.assertEqual(actual['generation_status'], 'error' if error else 'complete')
+                    self.assertEqual(actual['exact_match'], '' if error else '1.0')
+                    self.assertEqual(actual['generation_error'], str(error) if error else '')
+
     def test_ollama_disables_thinking(self):
         response = io.BytesIO(json.dumps(dict(response=' Albert Einstein ', done=True,
                                              done_reason='stop')).encode())

@@ -82,7 +82,15 @@ class SquadTests(unittest.TestCase):
             audit = json.loads((output / 'adaptive_selection.json').read_text())
             self.assertTrue(audit)
             self.assertEqual(set(audit[0]['candidates'][0]['metrics']), set(adaptive_baseline.METRICS))
-            self.assertTrue((output / 'summary.md').exists())
+            self.assertFalse(list(output.glob('*.md')))
+            with (output / 'results.csv').open(newline='', encoding='utf-8-sig') as file:
+                details = list(csv.DictReader(file))
+            self.assertEqual(len(details), len(rows))
+            for actual, expected in zip(details, rows):
+                self.assertEqual(json.loads(actual['selected_spans']), expected['selected_spans'])
+                self.assertEqual(actual['prompt'], expected['prompt'])
+                self.assertEqual(float(actual['retrieval_ms']), expected['retrieval_ms'])
+            self.assertTrue((output / 'preprocessing.csv').exists())
             with (output / 'summary.csv').open(newline='', encoding='utf-8-sig') as file:
                 exported = list(csv.DictReader(file))
             summary = json.loads((output / 'summary.json').read_text())
@@ -104,6 +112,10 @@ class SquadTests(unittest.TestCase):
                 output = squad.evaluate_squad(path, limit=1, output_root=directory)
             rows = [json.loads(line) for line in (output / 'results.jsonl').read_text().splitlines()]
             self.assertTrue(all(r['answer_f1'] is None and r['generation_status'] == 'error' for r in rows))
+            with (output / 'results.csv').open(newline='', encoding='utf-8-sig') as file:
+                exported = list(csv.DictReader(file))
+            self.assertTrue(all(r['answer_f1'] == '' and r['generation_error'] == 'offline'
+                                and r['generation_status'] == 'error' for r in exported))
             self.assertTrue(all(r['answer_f1'] == 0 and r['generation_errors'] == 1 for r in squad.summarize(rows)))
 
     def test_cli_routes_preserve_existing_modes(self):
