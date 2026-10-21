@@ -12,6 +12,29 @@ UPSTREAM_COMMIT = 'ea87ce8e1a97888f3f179e7f1359ff7f43fb179d'
 METRICS = ('RC', 'ICC', 'DCC', 'BI', 'SC')
 
 
+def adaptive_settings():
+    from main import project_env_values
+    values = project_env_values()
+    defaults = dict(ADAPTIVE_DEVICE='cpu',
+                    ADAPTIVE_EMBEDDING_MODEL='jinaai/jina-embeddings-v3',
+                    ADAPTIVE_COREF_MODEL='sapienzanlp/maverick-mes-ontonotes')
+    return {key: os.environ.get(key, values.get(key, default)).strip()
+            for key, default in defaults.items()}
+
+
+def validate_device(device, torch):
+    if device == 'cpu':
+        return device
+    if not re.fullmatch(r'cuda(?::[0-9]+)?', device):
+        raise ValueError('ADAPTIVE_DEVICE must be cpu, cuda, or cuda:N (for example cuda:0).')
+    index = int(device.split(':')[1]) if ':' in device else 0
+    if not torch.cuda.is_available() or index >= torch.cuda.device_count():
+        raise ValueError(f'ADAPTIVE_DEVICE={device} is unavailable in this Python environment. '
+                         'Use a CUDA-enabled PyTorch installation and an available GPU, '
+                         'or set ADAPTIVE_DEVICE=cpu.')
+    return f'cuda:{index}'
+
+
 def tokens_of(text):
     return [(m.group(), m.start(), m.end()) for m in re.finditer(r'\b\w+\b', text)]
 
@@ -83,6 +106,7 @@ class PaperBackend:
     """
     def __init__(self):
         try:
+            import torch
             import spacy
             from sentence_transformers import SentenceTransformer
             from adaptive_chunking import metrics
@@ -93,9 +117,10 @@ class PaperBackend:
                              'then python -m spacy download en_core_web_sm') from exc
         self.metrics = metrics
         self.splitter = RecursiveSplitter
-        device = os.environ.get('ADAPTIVE_DEVICE', 'cpu')
-        self.embedding_name = os.environ.get('ADAPTIVE_EMBEDDING_MODEL', 'jinaai/jina-embeddings-v3')
-        self.coref_name = os.environ.get('ADAPTIVE_COREF_MODEL', 'sapienzanlp/maverick-mes-ontonotes')
+        settings = adaptive_settings()
+        device = validate_device(settings['ADAPTIVE_DEVICE'], torch)
+        self.embedding_name = settings['ADAPTIVE_EMBEDDING_MODEL']
+        self.coref_name = settings['ADAPTIVE_COREF_MODEL']
         try:
             self.nlp = spacy.load('en_core_web_sm')
             self.embedder = _CachedEmbedder(SentenceTransformer(

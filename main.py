@@ -795,8 +795,8 @@ def ollama_answer(prompt, base_url, model):
         raise ValueError(f'Ollama returned an empty answer (done_reason={reason!r}).')
     return answer
 
-def ollama_config(base_url=None, model=None, env_path=None):
-    """Resolve explicit arguments > environment > project .env (KEY=value)."""
+def project_env_values(env_path=None):
+    """Read project .env without modifying the process environment."""
     path = Path(env_path) if env_path is not None else Path(__file__).with_name('.env')
     values = {}
     if path.is_file():
@@ -811,6 +811,12 @@ def ollama_config(base_url=None, model=None, env_path=None):
             if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
                 value = value[1:-1]
             values[key.strip()] = value
+    return values
+
+
+def ollama_config(base_url=None, model=None, env_path=None):
+    """Resolve explicit arguments > environment > project .env (KEY=value)."""
+    values = project_env_values(env_path)
     base_url = (base_url if base_url is not None else os.environ.get(
         'OLLAMA_BASE_URL', values.get('OLLAMA_BASE_URL', ''))).strip()
     model = (model if model is not None else os.environ.get(

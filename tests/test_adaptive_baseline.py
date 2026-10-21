@@ -34,6 +34,32 @@ class FixtureBackend:
 
 
 class AdaptiveTests(unittest.TestCase):
+    def test_device_setting_from_env_file_and_shell_override(self):
+        with patch.dict(adaptive.os.environ, {}, clear=True), \
+             patch.object(main.Path, 'is_file', return_value=True), \
+             patch.object(main.Path, 'read_text', return_value='ADAPTIVE_DEVICE="cuda:1"\n'):
+            self.assertEqual(adaptive.adaptive_settings()['ADAPTIVE_DEVICE'], 'cuda:1')
+            with patch.dict(adaptive.os.environ, {'ADAPTIVE_DEVICE': 'cpu'}):
+                self.assertEqual(adaptive.adaptive_settings()['ADAPTIVE_DEVICE'], 'cpu')
+        with patch.dict(adaptive.os.environ, {}, clear=True), \
+             patch.object(main.Path, 'is_file', return_value=False):
+            self.assertEqual(adaptive.adaptive_settings()['ADAPTIVE_DEVICE'], 'cpu')
+
+    def test_device_validation(self):
+        torch = Mock()
+        torch.cuda.is_available.return_value = True
+        torch.cuda.device_count.return_value = 2
+        self.assertEqual(adaptive.validate_device('cpu', torch), 'cpu')
+        torch.cuda.is_available.assert_not_called()
+        self.assertEqual(adaptive.validate_device('cuda', torch), 'cuda:0')
+        self.assertEqual(adaptive.validate_device('cuda:1', torch), 'cuda:1')
+        for device in ('gpu', 'cuda:-1', 'cuda:2', ''):
+            with self.subTest(device=device), self.assertRaises(ValueError):
+                adaptive.validate_device(device, torch)
+        torch.cuda.is_available.return_value = False
+        with self.assertRaisesRegex(ValueError, 'unavailable'):
+            adaptive.validate_device('cuda:0', torch)
+
     def test_selects_best_strategy_and_records_five_scores(self):
         chunker = adaptive.AdaptiveChunker(FixtureBackend())
         document = chunker.build_documents(['one two three four five six seven eight'], 4)[0]

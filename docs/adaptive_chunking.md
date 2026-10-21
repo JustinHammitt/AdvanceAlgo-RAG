@@ -30,16 +30,24 @@ python -m spacy download en_core_web_sm
 The first adaptive run loads/downloads Jina embeddings and Maverick coreference
 models from Hugging Face. This requires network access, disk space, and substantially
 more RAM and preprocessing time than the former sentence-packing method. CPU is
-the default; set `ADAPTIVE_DEVICE=cuda:0` in the shell when supported by your PyTorch
+the default; set `ADAPTIVE_DEVICE=cuda:0` in the project `.env` when supported by your PyTorch
 installation. These NLP models run in the Python process; Ollama still handles
 answer generation using `.env` configuration. The embedding implementation loads
 the model's custom Python code (`trust_remote_code=True`), as required by Jina v3.
 
-Optional shell environment variables (not read from `.env`):
+Optional settings in the project `.env` (exported shell variables take precedence):
 
 - `ADAPTIVE_DEVICE`: default `cpu`.
 - `ADAPTIVE_EMBEDDING_MODEL`: default `jinaai/jina-embeddings-v3`.
 - `ADAPTIVE_COREF_MODEL`: default `sapienzanlp/maverick-mes-ontonotes`.
+
+Use `ADAPTIVE_DEVICE=cpu` for CPU or `ADAPTIVE_DEVICE=cuda:0` for the first
+NVIDIA GPU (`cuda:1` for the second). Restart the evaluation after changing it;
+the models are cached for the lifetime of the Python process. An unavailable
+GPU produces an error before model loading rather than silently using CPU.
+This setting controls Jina embeddings and Maverick coreference; spaCy remains
+on CPU. Ollama manages its own device independently. If both use the same GPU,
+their model memory requirements add together.
 
 Changing these models changes the experiment; actual names are recorded in
 reports. Maverick's optional upstream dependency is CC BY-NC-SA 4.0; see the
